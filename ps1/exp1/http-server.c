@@ -43,6 +43,7 @@ void handle_http_request(int sock)
     {
         strcat(url, "/");
     }
+    char response[BUF_SIZE]={0};
     // 检查是否是目录
     struct stat st;
     if(stat(url, &st) == 0 && S_ISDIR(st.st_mode))
@@ -54,7 +55,6 @@ void handle_http_request(int sock)
         return;
     }
     FILE* fp=fopen(url,"rb");
-    char response[BUFFER_SIZE]={0};
     //找不到文件情况，返回404
     if(fp==NULL){
         perror("fopen failed");
@@ -112,7 +112,8 @@ void handle_https_request(SSL* ssl)
 		exit(1);
 	}
     else {
-		char buf[BUFFER_SIZE] = {0};
+        char response[BUF_SIZE]={0};
+		char buf[BUF_SIZE] = {0};
         int bytes = SSL_read(ssl, buf, sizeof(buf));
 		if (bytes < 0) {
 			perror("SSL_read failed");
@@ -156,7 +157,6 @@ void handle_https_request(SSL* ssl)
         return;
     }
     FILE* fp=fopen(url,"rb");
-    char response[BUFFER_SIZE]={0};
      //找不到文件情况，返回404
     if(fp==NULL){
         perror("fopen failed");
@@ -293,32 +293,31 @@ void* httpsthread(void* arg)
     while (1) {
         struct sockaddr_in caddr;
         socklen_t len;
-        int csock = accept(sock, (struct sockaddr*)&caddr, &len);
+        int csock = accept(sock443, (struct sockaddr*)&caddr, &len);
+        SSL *ssl = SSL_new(ctx); 
+        SSL_set_fd(ssl, csock);
         if (csock < 0) {
             perror("Accept failed");
             SSL_free(ssl);
             close(csock);
             continue;
         }
-        SSL *ssl = SSL_new(ctx); 
-        SSL_set_fd(ssl, csock);
         handle_https_request(ssl);
     }
 
-    close(sock);
     SSL_CTX_free(ctx);
 }
 int main()
 {
 	pthread_t tid[2];
 	int result;
-    result = pthread_create(&tid[0], NULL, threadHttp, NULL);
+    result = pthread_create(&tid[0], NULL, httpthread, NULL);
 	if (result != 0) {
 		perror("Error creating HTTP thread");
 		exit(1);
 	}
 	
-	result = pthread_create(&tid[1], NULL, threadHttps, NULL);
+	result = pthread_create(&tid[1], NULL, httpsthread, NULL);
 	if (result != 0) {
 		perror("Error creating HTTPS thread");
 		exit(1);

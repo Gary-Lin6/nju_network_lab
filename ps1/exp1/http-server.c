@@ -16,95 +16,39 @@
 //http响应请求
 void handle_http_request(int sock)
 {
-    //读请求
-    char buf[BUF_SIZE]={0};
-    int bytes=read(sock,buf,sizeof(buf));
-    if(bytes<0){
+    char buf[BUF_SIZE] = {0};
+    int bytes = read(sock, buf, sizeof(buf));
+    if (bytes < 0) {
         perror("read failed");
-        exit(1);
+        close(sock);
+        return;
     }
-    //解析请求，method：get...,url:文件,httpVersion:HTTP/1.0
-    char method[16],url[256],httpVersion[16];
-	sscanf(buf,"%s %s %s",method,url,httpVersion);
-    //获取range字段
-    char *range=strstr(buf,"Range:");
-    //处理url，去掉开头的'/'
-    if(url[0]=='/')
-	{
-		int i=0;
-		for(;url[i]!='\0' && url[i+1]!='\0';i++)
-		{
-			url[i]=url[i+1];
-		}
-		url[i]='\0';
-	}
-    // 如果url不以'/'结尾，添加'/'
-    if(url[strlen(url)-1] != '/')
-    {
-        strcat(url, "/");
+
+    char method[16], url[256], httpVersion[16];
+    sscanf(buf, "%15s %255s %15s", method, url, httpVersion);
+
+    // 解析 Host 头用于构建重定向目标
+    char host[256] = {0};
+    char *host_hdr = strstr(buf, "Host:");
+    if (host_hdr) {
+        sscanf(host_hdr, "Host: %255s", host);
     }
-    char response[BUF_SIZE]={0};
-    // 检查是否是目录
-    struct stat st;
-    if(stat(url, &st) == 0 && S_ISDIR(st.st_mode))
-    {
-        // 返回301重定向到index.html
-        sprintf(response, "%s 301 Moved Permanently\r\nLocation: /%sindex.html\r\n\r\n", httpVersion, url);
+
+    // 直接将所有 http 请求重定向到 https（保留原始路径）
+    if (host[0] != '\0') {
+        char response[BUF_SIZE] = {0};
+        sprintf(response,
+                "%s 301 Moved Permanently\r\n"
+                "Location: https://%s%s\r\n"
+                "Content-Length: 0\r\n"
+                "\r\n",
+                httpVersion, host, url);
         write(sock, response, strlen(response));
         close(sock);
         return;
     }
-    FILE* fp=fopen(url,"rb");
-    //找不到文件情况，返回404
-    if(fp==NULL){
-        perror("fopen failed");
-        //发送响应报文
-        sprintf(response,"%s 404 Not Found\r\nContent-Type: text/plain\r\nContent-Length: 13\r\n\r\n404 Not Found",httpVersion);
-        write(sock,response,strlen(response));
-        close(sock);
-        return;
-    }
-    //range情况，返回206
-    else if(range){
-        struct stat st;
-        stat(url,&st);
-        int file_size=st.st_size;
-        int start,end;
-        sscanf(range,"Range: bytes=%d-%d",&start,&end);
-        int range_size;
-        if(end==-1) range_size=file_size-start;
-        else 
-            range_size=end-start+1;
-        //发送响应报文
-        sprintf(response,"%s 206 Partial Content\r\nContent-Type: text/plain\r\nContent-Length: %d\r\nContent-Range: bytes %d-%d/%d\r\n\r\n",httpVersion,range_size,start,end,file_size);
-        write(sock,response,strlen(response));
-        //发送部分文件
-        fseek(fp,start,SEEK_SET);
-        char file_buf[BUF_SIZE];
-        int bytes_to_send=range_size;
-        while(bytes_to_send>0){
-            int chunk_size=fread(file_buf,1,sizeof(file_buf),fp);
-            if(chunk_size<=0) break;
-            if(chunk_size>bytes_to_send) chunk_size=bytes_to_send;
-            write(sock,file_buf,chunk_size);
-            bytes_to_send-=chunk_size;
-        }
-    }
-    //成功，返回200
-    else{
-        //发送报文
-        sprintf(response,"%s 200 OK\r\nContent-Type: text/plain\r\nContent-Length: %d\r\n\r\n",httpVersion,BUF_SIZE);
-        write(sock,response,strlen(response));
-        //发送文件
-        char file_buf[BUF_SIZE];
-        int bytes_read;
-        while((bytes_read=fread(file_buf,1,sizeof(file_buf),fp))>0){
-            write(sock,file_buf,bytes_read);
-        }
-    }
-    fclose(fp);
-    close(sock);
 }
+
 void handle_https_request(SSL* ssl)
 {
     if (SSL_accept(ssl) == -1){
@@ -141,44 +85,26 @@ void handle_https_request(SSL* ssl)
 		}
 		url[i]='\0';
 	}
-    // 如果url不以'/'结尾，添加'/'
-    if(url[strlen(url)-1] != '/')
-    {
-        strcat(url, "/");
-    } struct stat st;
-    if(stat(url, &st) == 0 && S_ISDIR(st.st_mode))
-    {
-        // 返回301重定向到index.html
-        sprintf(response, "%s 301 Moved Permanently\r\nLocation: /%sindex.html\r\n\r\n", httpVersion, url);
-        SSL_write(ssl, response, strlen(response));
-        int sock=SSL_get_fd(ssl);
-        SSL_free(ssl);
-        close(sock);
-        return;
-    }
     FILE* fp=fopen(url,"rb");
+    struct stat st;
+    stat(url,&st);
+    int file_size=st.st_size;
      //找不到文件情况，返回404
     if(fp==NULL){
         perror("fopen failed");
         //发送响应报文
         sprintf(response,"%s 404 Not Found\r\nContent-Type: text/plain\r\nContent-Length: 13\r\n\r\n404 Not Found",httpVersion);
         SSL_write(ssl, response, strlen(response));
-        int sock=SSL_get_fd(ssl);
-        SSL_free(ssl);
-        close(sock);
-        return;
     }
     //range情况，返回206
     else if(range){
-        struct stat st;
-        stat(url,&st);
-        int file_size=st.st_size;
-        int start,end;
+        int start=0,end=-1;
         sscanf(range,"Range: bytes=%d-%d",&start,&end);
         int range_size;
-        if(end==-1) range_size=file_size-start;
-        else 
-            range_size=end-start+1;
+        if(end==-1||end>=file_size) end=file_size-1;
+        if(start<0) start=0;
+        if(start>end) start=end;
+        range_size=end-start+1;
         //发送响应报文
         sprintf(response,"%s 206 Partial Content\r\nContent-Type: text/plain\r\nContent-Length: %d\r\nContent-Range: bytes %d-%d/%d\r\n\r\n",httpVersion,range_size,start,end,file_size);
         SSL_write(ssl, response, strlen(response));
@@ -197,7 +123,7 @@ void handle_https_request(SSL* ssl)
     //成功，返回200
     else{
         //发送报文
-        sprintf(response,"%s 200 OK\r\nContent-Type: text/plain\r\nContent-Length: %d\r\n\r\n",httpVersion,BUF_SIZE);
+        sprintf(response,"%s 200 OK\r\nContent-Type: appliccation/octet-stream\r\nContent-Length: %d\r\n\r\n",httpVersion,file_size);
         SSL_write(ssl, response, strlen(response));
         //发送文件
         char file_buf[BUF_SIZE];
@@ -233,6 +159,7 @@ void* httpthread(void* arg)
 		perror("Bind failed");
 		exit(1);
 	}
+    listen(sock80, 10);
     while (1) {
 		struct sockaddr_in caddr;
 		socklen_t len;

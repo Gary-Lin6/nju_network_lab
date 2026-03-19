@@ -10,7 +10,7 @@ static struct list_head timer_list;
 // scan the timer_list, find the tcp sock which stays for at 2*MSL, release it
 void tcp_scan_timer_list()
 {
-	fprintf(stdout, "TODO: implement %s please.\n", __FUNCTION__);
+	
 }
 
 // set the timewait timer of a tcp sock, by adding the timer into timer_list

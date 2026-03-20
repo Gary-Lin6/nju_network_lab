@@ -4,19 +4,51 @@
 
 #include <stdio.h>
 #include <unistd.h>
+#include <pthread.h>
+#include "log.h"
 
 static struct list_head timer_list;
+static pthread_mutex_t timer_list_lock = PTHREAD_MUTEX_INITIALIZER;
 
 // scan the timer_list, find the tcp sock which stays for at 2*MSL, release it
 void tcp_scan_timer_list()
 {
+	struct tcp_timer *timer, *tmp;
+	struct tcp_sock *tsk;
 	
+	pthread_mutex_lock(&timer_list_lock);
+	
+	list_for_each_entry_safe(timer, tmp, &timer_list, list) {
+		if (timer->enable && timer->type == 0) {  // TIME_WAIT timer
+			timer->timeout -= TCP_TIMER_SCAN_INTERVAL;
+			if (timer->timeout <= 0) {
+				tsk = timewait_to_tcp_sock(timer);
+				log(DEBUG, "TIME_WAIT timeout, closing connection");
+				tcp_set_state(tsk, TCP_CLOSED);
+				tcp_unhash(tsk);  // 从哈希表中移除
+				list_delete_entry(&timer->list);  // 从定时器列表移除
+			}
+		}
+	}
+	
+	pthread_mutex_unlock(&timer_list_lock);
 }
 
 // set the timewait timer of a tcp sock, by adding the timer into timer_list
 void tcp_set_timewait_timer(struct tcp_sock *tsk)
 {
-	fprintf(stdout, "TODO: implement %s please.\n", __FUNCTION__);
+	pthread_mutex_lock(&timer_list_lock);
+	
+	tsk->timewait.type = 0;  // TIME_WAIT timer
+	tsk->timewait.timeout = TCP_TIMEWAIT_TIMEOUT;  // 2*MSL
+	tsk->timewait.enable = 1;
+	
+	// 添加到定时器列表
+	list_add_head(&tsk->timewait.list, &timer_list);
+	
+	pthread_mutex_unlock(&timer_list_lock);
+	
+	log(DEBUG, "TIME_WAIT timer set for 2*MSL (%d us)", TCP_TIMEWAIT_TIMEOUT);
 }
 
 // scan the timer_list periodically by calling tcp_scan_timer_list

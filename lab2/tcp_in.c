@@ -64,7 +64,7 @@ void tcp_process(struct tcp_sock *tsk, struct tcp_cb *cb, char *packet)
 				new_tsk->iss = tcp_new_iss();
 				new_tsk->snd_nxt = new_tsk->iss;
 				new_tsk->rcv_nxt = cb->seq + 1;
-				
+
 				//加入listen队列，发送SYN+ACK报文，状态转为SYN_RECV，并加入哈希表
 				list_add_tail(&new_tsk->list, &tsk->listen_queue);
 				tcp_send_control_packet(new_tsk, TCP_SYN|TCP_ACK);
@@ -110,6 +110,7 @@ void tcp_process(struct tcp_sock *tsk, struct tcp_cb *cb, char *packet)
 					tcp_sock_accept_enqueue(tsk);
 					tcp_set_state(tsk, TCP_ESTABLISHED);
 					wake_up(tsk->parent->wait_accept);
+					return;
 				}
 				else{
 					log(ERROR, "received ACK with wrong ack number, drop it.");
@@ -117,6 +118,45 @@ void tcp_process(struct tcp_sock *tsk, struct tcp_cb *cb, char *packet)
 			}
 			break;
 		}
-	
+		case TCP_ESTABLISHED:{
+			/* if(cb->flags & TCP_ACK){
+				tcp_update_window_safe(tsk, cb); }*/
+			if(cb->flags & TCP_FIN){
+				log(DEBUG,"收到FIN报文,准备第二次挥手");
+				tsk->rcv_nxt = cb->seq + 1;
+				/* wait_exit(tsk->wait_recv);
+				wait_exit(tsk->wait_send); */
+				tcp_send_control_packet(tsk, TCP_ACK);
+				tcp_set_state(tsk, TCP_CLOSE_WAIT);
+				return;
+			}
+			break;
+		}
+		case TCP_FIN_WAIT_1:{
+			if(cb->flags & TCP_ACK){
+				log(DEBUG,"收到ACK报文,进入TCP_FIN_WAIT_2状态");
+				tcp_set_state(tsk, TCP_FIN_WAIT_2);
+				return;
+			}
+		}
+		case TCP_FIN_WAIT_2:{
+			if(cb->flags & TCP_FIN){
+				log(DEBUG,"收到ACK报文,准备第四次挥手");
+				tcp_set_state(tsk, TCP_TIME_WAIT);
+				tcp_send_control_packet(tsk, TCP_ACK);
+				tcp_set_timewait_timer(tsk);
+				return;
+			}
+			break;
+			}
+		case TCP_LAST_ACK:{
+			if(cb->flags & TCP_ACK){
+				log(DEBUG,"收到ACK报文,连接关闭");
+				tcp_set_state(tsk, TCP_CLOSED);
+				tcp_unhash(tsk);
+				return;
+			}
+			break;
+		}
 	}
 }

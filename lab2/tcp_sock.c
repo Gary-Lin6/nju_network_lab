@@ -368,6 +368,20 @@ struct tcp_sock *tcp_sock_accept(struct tcp_sock *tsk)
 // to the peer, switching TCP_STATE to closed
 void tcp_sock_close(struct tcp_sock *tsk)
 {
-	log(DEBUG,"TODO");
+	switch (tsk->state){
+		case TCP_CLOSED:
+			log(DEBUG,"已经在关闭状态了");
+			break;
+		case TCP_ESTABLISHED:
+			log(DEBUG,"开始第一次挥手,发送FIN报文,进入FIN_WAIT_1状态");
+			tcp_send_control_packet(tsk, TCP_FIN);
+			tcp_set_state(tsk, TCP_FIN_WAIT_1);
+			break;
+		case TCP_CLOSE_WAIT:
+			log(DEBUG,"开始第三次挥手,发送FIN报文,进入LAST_ACK状态");
+			tcp_send_control_packet(tsk, TCP_FIN);
+			tcp_set_state(tsk, TCP_LAST_ACK);
+			break;
+	}
 
 }

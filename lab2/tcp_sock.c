@@ -274,14 +274,19 @@ int tcp_sock_connect(struct tcp_sock *tsk, struct sock_addr *skaddr)
     return -1;
 	}
 
+	tsk->iss = tcp_new_iss();
+	tsk->snd_nxt = tsk->iss;
+	tsk->snd_una = tsk->iss;
+	tcp_set_state(tsk, TCP_SYN_SENT);
 //2. hash the tcp sock into bind_table;
-	//其实在设置源端口设置sport时，已经调用了tcp_bind_hash函数将tcp sock哈希到了bind_table中
-	// 所以这里不需要再调用一次tcp_bind_hash了
+ 	if (tcp_hash(tsk) < 0) {
+        log(ERROR, "connect: failed to hash tsk");
+        return -1;
+    }
 
 //3. send SYN packet, switch to TCP_SYN_SENT state, wait for the incoming
 //    SYN packet by sleep on wait_connect;
 	tcp_send_control_packet(tsk, TCP_SYN);
-	tcp_set_state(tsk, TCP_SYN_SENT);
 
 //if the SYN packet of the peer arrives, this function is notified, which
 //    means the connection is established.
@@ -363,34 +368,6 @@ struct tcp_sock *tcp_sock_accept(struct tcp_sock *tsk)
 // to the peer, switching TCP_STATE to closed
 void tcp_sock_close(struct tcp_sock *tsk)
 {
-	switch(tsk->state){
-		case TCP_CLOSED:
-			break;
-		case TCP_LISTEN:
-			tcp_sock_clear_listen_queue(tsk);
-			tcp_unhash(tsk);
-			tcp_set_state(tsk, TCP_CLOSED);
-			break;
-		case TCP_SYN_RECV:
-			tcp_send_control_packet(tsk, TCP_FIN|TCP_ACK);
-			tcp_unhash(tsk);
-			tcp_set_state(tsk, TCP_FIN_WAIT_1);
-			break;
-		case TCP_SYN_SENT:
-			tcp_unhash(tsk);
-            tcp_set_state(tsk, TCP_CLOSED);
-			break;
-		case TCP_ESTABLISHED:
-			tcp_send_control_packet(tsk, TCP_FIN|TCP_ACK);
-			tcp_unhash(tsk);
-			tcp_set_state(tsk, TCP_FIN_WAIT_1);
-			break;
-		case TCP_CLOSE_WAIT:
-			tcp_send_control_packet(tsk, TCP_FIN|TCP_ACK);
-			tcp_set_state(tsk, TCP_LAST_ACK);
-			break;
-		default:
-			break;
-	}
+	log(DEBUG,"TODO");
 
 }

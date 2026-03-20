@@ -45,5 +45,78 @@ static inline int is_tcp_seq_valid(struct tcp_sock *tsk, struct tcp_cb *cb)
 // Process the incoming packet according to TCP state machine. 
 void tcp_process(struct tcp_sock *tsk, struct tcp_cb *cb, char *packet)
 {
-	fprintf(stdout, "TODO: implement %s please.\n", __FUNCTION__);
+	switch(tsk->state){
+		case TCP_CLOSED:
+			break;
+	//三次握手过程
+		//第一次握手
+		case TCP_LISTEN:{
+			if(cb->flags & TCP_SYN){
+				log(DEBUG,"第一次握手");
+				//建立子sock，
+				struct tcp_sock *new_tsk = alloc_tcp_sock();
+				new_tsk->parent = tsk;
+				new_tsk->sk_dip = cb->saddr;
+				new_tsk->sk_dport = cb->sport;
+				new_tsk->sk_sip = cb->daddr;
+				new_tsk->sk_sport = tsk->sk_sport;
+
+				new_tsk->iss = tcp_new_iss();
+				new_tsk->snd_nxt = new_tsk->iss;
+				new_tsk->rcv_nxt = cb->seq + 1;
+				
+				//加入listen队列，发送SYN+ACK报文，状态转为SYN_RECV，并加入哈希表
+				list_add_tail(&new_tsk->list, &tsk->listen_queue);
+				tcp_send_control_packet(new_tsk, TCP_SYN|TCP_ACK);
+				tcp_set_state(new_tsk, TCP_SYN_RECV);
+				tcp_hash(new_tsk);
+				return;
+			}
+			else{
+				log(ERROR, "received non-SYN packet in LISTEN state, drop it.");
+				tcp_send_reset(cb);
+				return;
+			}
+			break;
+		}
+		//第二次握手
+		case TCP_SYN_SENT:{
+			if(cb->flags & TCP_SYN && cb->flags & TCP_ACK){
+				log(DEBUG,"第二次握手");
+				if(cb->ack == tsk->iss + 1){
+					tsk->rcv_nxt = cb->seq + 1;
+					tcp_send_control_packet(tsk, TCP_ACK);
+					tcp_set_state(tsk, TCP_ESTABLISHED);
+					wake_up(tsk->wait_connect);
+				}
+				else{
+					log(ERROR, "received ACK with wrong ack number, drop it.");
+				}
+			}
+			else if(cb->flags & TCP_SYN){
+				tsk->rcv_nxt = cb->seq + 1;
+				tcp_send_control_packet(tsk, TCP_ACK);
+			}
+			else{
+				log(ERROR, "received packet with wrong flags in SYN_SENT state, drop it.");
+			}
+			break;
+		}
+		//第三次握手
+		case TCP_SYN_RECV:{
+			if(cb->flags & TCP_ACK){
+				if(cb->ack == tsk->iss + 1){
+					log(DEBUG,"第三次握手");
+					tcp_sock_accept_enqueue(tsk);
+					tcp_set_state(tsk, TCP_ESTABLISHED);
+					wake_up(tsk->parent->wait_accept);
+				}
+				else{
+					log(ERROR, "received ACK with wrong ack number, drop it.");
+				}
+			}
+			break;
+		}
+	
+	}
 }

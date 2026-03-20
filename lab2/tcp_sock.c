@@ -76,6 +76,7 @@ void free_tcp_sock(struct tcp_sock *tsk)
 {
 	tsk->ref_cnt -= 1;
 	if(tsk->ref_cnt <= 0){
+		log(DEBUG, "you are free!!!");
 		if(tsk->wait_connect)
 			free_wait_struct(tsk->wait_connect);
 		if(tsk->wait_accept)
@@ -367,10 +368,26 @@ struct tcp_sock *tcp_sock_accept(struct tcp_sock *tsk)
 // close the tcp sock, by releasing the resources, sending FIN/RST packet
 // to the peer, switching TCP_STATE to closed
 void tcp_sock_close(struct tcp_sock *tsk)
-{
+{	
+	log(DEBUG,"主动关闭，当前状态：%s", tcp_state_str[tsk->state]);
 	switch (tsk->state){
 		case TCP_CLOSED:
 			log(DEBUG,"已经在关闭状态了");
+			break;
+		case TCP_LISTEN:
+			log(DEBUG,"直接进入关闭状态");
+			tcp_unhash(tsk);
+			tcp_set_state(tsk, TCP_CLOSED);
+			break;
+		case TCP_SYN_SENT:
+			log(DEBUG,"直接进入关闭状态");
+			tcp_unhash(tsk);
+			tcp_set_state(tsk, TCP_CLOSED);
+			break;
+		case TCP_SYN_RECV:
+			log(DEBUG,"进入TCP_FIN_WAIT_1状态,发送FIN报文");
+			tcp_send_control_packet(tsk, TCP_FIN);
+			tcp_set_state(tsk, TCP_FIN_WAIT_1);
 			break;
 		case TCP_ESTABLISHED:
 			log(DEBUG,"开始第一次挥手,发送FIN报文,进入FIN_WAIT_1状态");

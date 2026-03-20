@@ -19,14 +19,18 @@ void tcp_scan_timer_list()
 	pthread_mutex_lock(&timer_list_lock);
 	
 	list_for_each_entry_safe(timer, tmp, &timer_list, list) {
-		if (timer->enable && timer->type == 0) {  // TIME_WAIT timer
+		if (timer->enable && timer->type == 0) {
 			timer->timeout -= TCP_TIMER_SCAN_INTERVAL;
 			if (timer->timeout <= 0) {
+				list_delete_entry(&timer->list);
+				timer->enable = 0; 
 				tsk = timewait_to_tcp_sock(timer);
 				log(DEBUG, "TIME_WAIT timeout, closing connection");
+				if (!tsk->parent) {
+					tcp_bind_unhash(tsk);
+				}
 				tcp_set_state(tsk, TCP_CLOSED);
-				tcp_unhash(tsk);  // 从哈希表中移除
-				list_delete_entry(&timer->list);  // 从定时器列表移除
+				tcp_unhash(tsk);  // 释放内存
 			}
 		}
 	}
@@ -45,7 +49,8 @@ void tcp_set_timewait_timer(struct tcp_sock *tsk)
 	
 	// 添加到定时器列表
 	list_add_head(&tsk->timewait.list, &timer_list);
-	
+	tsk->ref_cnt += 1;
+
 	pthread_mutex_unlock(&timer_list_lock);
 	
 	log(DEBUG, "TIME_WAIT timer set for 2*MSL (%d us)", TCP_TIMEWAIT_TIMEOUT);

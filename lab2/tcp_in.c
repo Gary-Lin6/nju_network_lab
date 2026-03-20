@@ -47,6 +47,8 @@ void tcp_process(struct tcp_sock *tsk, struct tcp_cb *cb, char *packet)
 {
 	switch(tsk->state){
 		case TCP_CLOSED:
+			log(ERROR, "received packet for closed socket, drop it.");
+			tcp_send_reset(cb);
 			break;
 	//三次握手过程
 		//第一次握手
@@ -70,12 +72,10 @@ void tcp_process(struct tcp_sock *tsk, struct tcp_cb *cb, char *packet)
 				tcp_send_control_packet(new_tsk, TCP_SYN|TCP_ACK);
 				tcp_set_state(new_tsk, TCP_SYN_RECV);
 				tcp_hash(new_tsk);
-				return;
 			}
 			else{
 				log(ERROR, "received non-SYN packet in LISTEN state, drop it.");
 				tcp_send_reset(cb);
-				return;
 			}
 			break;
 		}
@@ -110,7 +110,6 @@ void tcp_process(struct tcp_sock *tsk, struct tcp_cb *cb, char *packet)
 					tcp_sock_accept_enqueue(tsk);
 					tcp_set_state(tsk, TCP_ESTABLISHED);
 					wake_up(tsk->parent->wait_accept);
-					return;
 				}
 				else{
 					log(ERROR, "received ACK with wrong ack number, drop it.");
@@ -128,33 +127,55 @@ void tcp_process(struct tcp_sock *tsk, struct tcp_cb *cb, char *packet)
 				wait_exit(tsk->wait_send); */
 				tcp_send_control_packet(tsk, TCP_ACK);
 				tcp_set_state(tsk, TCP_CLOSE_WAIT);
-				return;
 			}
 			break;
 		}
 		case TCP_FIN_WAIT_1:{
-			if(cb->flags & TCP_ACK){
+			if(cb->flags & TCP_ACK && cb->flags & TCP_FIN){
+				log(DEBUG,"同时收到收到ACK和FIN报文,直接进入TCP_TIME_WAIT状态");
+				tcp_send_control_packet(tsk, TCP_ACK);
+				tcp_set_state(tsk, TCP_TIME_WAIT);
+				tcp_set_timewait_timer(tsk);
+			}
+			else if(cb->flags & TCP_ACK){
 				log(DEBUG,"收到ACK报文,进入TCP_FIN_WAIT_2状态");
 				tcp_set_state(tsk, TCP_FIN_WAIT_2);
-				return;
 			}
+			else if (cb->flags & TCP_FIN){
+				log(DEBUG,"收到FIN报文,进入TCP_CLOSING状态"); 
+				tcp_send_control_packet(tsk, TCP_ACK);
+				tcp_set_state(tsk, TCP_CLOSING);
+			}	
+			break;
 		}
+
 		case TCP_FIN_WAIT_2:{
 			if(cb->flags & TCP_FIN){
 				log(DEBUG,"收到ACK报文,准备第四次挥手");
 				tcp_set_state(tsk, TCP_TIME_WAIT);
 				tcp_send_control_packet(tsk, TCP_ACK);
 				tcp_set_timewait_timer(tsk);
-				return;
 			}
 			break;
+		}
+
+		case TCP_CLOSING:{
+			if(cb->flags & TCP_ACK){
+				log(DEBUG,"收到ACK报文,进入TCP_TIME_WAIT状态");
+				tcp_set_state(tsk, TCP_TIME_WAIT);
+				tcp_set_timewait_timer(tsk);
 			}
+			break;
+		}
+
 		case TCP_LAST_ACK:{
 			if(cb->flags & TCP_ACK){
 				log(DEBUG,"收到ACK报文,连接关闭");
 				tcp_set_state(tsk, TCP_CLOSED);
 				tcp_unhash(tsk);
-				return;
+			}
+			else{
+				log(DEBUG,"收到非ACK报文,绝望的等待desuwa");
 			}
 			break;
 		}
